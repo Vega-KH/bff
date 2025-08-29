@@ -1,0 +1,6 @@
+streamlit
+facexlib
+numpy
+opencv-python
+torch
+Pillow
