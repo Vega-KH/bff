@@ -3,7 +3,7 @@ import numpy as np
 from facexlib.utils.face_restoration_helper import FaceRestoreHelper
 from facexlib.detection import retinaface
 
-from modules.images import bgr_image_to_rgb_tensor, rgb_tensor_to_bgr_image
+from modules.images import bgr_image_to_rgb_tensor, rgb_tensor_to_bgr_image, save_image_to_cache
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,8 @@ def extract_faces(np_image: np.ndarray, face_helper: FaceRestoreHelper):
         face_helper.get_face_landmarks_5(only_center_face=False, resize=640, eye_dist_threshold=5)
         face_helper.align_warp_face()
         logger.debug("Found %d faces", len(face_helper.cropped_faces))
+        for i, face in enumerate(face_helper.cropped_faces):
+            save_image_to_cache(face, f"face{i+1}_original.png")
         return face_helper.cropped_faces
     finally:
         face_helper.clean_all()

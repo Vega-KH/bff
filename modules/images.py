@@ -1,6 +1,28 @@
 import cv2
 import numpy as np
 import torch
+import os
+import shutil
+from PIL import Image
+
+
+CACHE_DIR = '.cache'
+
+def clear_cache():
+    """Clears the cache directory."""
+    if os.path.exists(CACHE_DIR):
+        shutil.rmtree(CACHE_DIR)
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+def save_image_to_cache(image: np.ndarray, filename: str):
+    """Saves a BGR numpy image to the cache as an RGB image."""
+    if not os.path.exists(CACHE_DIR):
+        os.makedirs(CACHE_DIR)
+    
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(image_rgb)
+    save_path = os.path.join(CACHE_DIR, filename)
+    pil_img.save(save_path)
 
 
 def bgr_image_to_rgb_tensor(img: np.ndarray) -> torch.Tensor:

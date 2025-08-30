@@ -50,7 +50,7 @@ class CommonFaceRestoration(face_restoration.FaceRestoration):
     def load_net(self) -> torch.nn.Module:
         raise NotImplementedError("load_net must be implemented by subclasses")
 
-    def restore(self, np_image: np.ndarray) -> np.ndarray:
+    def restore(self, np_image: np.ndarray, w: float | None = None) -> np.ndarray:
         raise NotImplementedError("restore must be implemented by subclasses")
 
 

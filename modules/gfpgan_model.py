@@ -42,7 +42,7 @@ class FaceRestorerGFPGAN(face_restoration_utils.CommonFaceRestoration):
             ).model
         raise ValueError("No GFPGAN model found")
 
-    def restore(self, np_image):
+    def restore(self, np_image, w: float | None = None):
         def restore_face(cropped_face_t):
             assert self.net is not None
             output = self.net(cropped_face_t, return_rgb=False)
