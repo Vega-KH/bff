@@ -6,3 +6,4 @@ torch
 Pillow
 spandrel
 spandrel_extra_arches
+scikit-image

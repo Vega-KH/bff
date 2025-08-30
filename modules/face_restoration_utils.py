@@ -108,6 +108,4 @@ class CommonFaceRestoration(face_restoration.FaceRestoration):
             return img
         finally:
             self.send_model_to(devices.cpu)
-            gc.collect()      
-            torch.cuda.empty_cache()
-            # devices.torch_gc() THIS LINE WAS CAUSING AN ERROR
+            devices.torch_gc() 
