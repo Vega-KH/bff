@@ -2,3 +2,4 @@
 .rooignore
 modules/__pycache__/
 docs/
+models/
