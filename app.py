@@ -3,7 +3,7 @@ import os
 import cv2
 import numpy as np
 from PIL import Image
-from modules.face_extractor import create_face_helper, extract_faces
+from modules.face_extractor import create_face_helper, extract_faces, paste_faces
 from modules.devices import get_optimal_device
 from modules.gfpgan_model import setup_model as setup_gfpgan, gfpgan_face_restorer
 from modules.codeformer_model import setup_model as setup_codeformer, codeformer_face_restorer
@@ -12,6 +12,12 @@ from modules.merger import merge_images_hybrid, precompute_error_maps
 
 st.set_page_config(layout="wide")
 st.title("BFF - Better Face Fixer")
+
+# --- Image Display Area ---
+if st.session_state.get('final_image') is not None:
+    st.image(st.session_state.final_image, caption='Final Result', use_column_width=True)
+elif st.session_state.get('original_image') is not None:
+    st.image(st.session_state.original_image, caption='Uploaded Image', use_column_width=True)
 
 # Create a cache directory if it doesn't exist
 if not os.path.exists('.cache'):
@@ -39,13 +45,19 @@ if 'codeformer_weights' not in st.session_state:
 if 'alpha' not in st.session_state:
     st.session_state.alpha = 0.5
 if 'delta_threshold' not in st.session_state:
-    st.session_state.delta_threshold = 0.1
+    st.session_state.delta_threshold = 0.35
 if 'tie_epsilon' not in st.session_state:
     st.session_state.tie_epsilon = 1e-3
 if 'merge_stats' not in st.session_state:
     st.session_state.merge_stats = []
 if 'error_maps_cache' not in st.session_state:
     st.session_state.error_maps_cache = []
+if 'face_helper' not in st.session_state:
+    st.session_state.face_helper = None
+if 'original_image' not in st.session_state:
+    st.session_state.original_image = None
+if 'final_image' not in st.session_state:
+    st.session_state.final_image = None
 
 
 def run_merge(face_index: int):
@@ -95,13 +107,15 @@ if uploaded_file is not None:
     images.clear_cache()
     pil_image = Image.open(uploaded_file)
     np_image = np.array(pil_image)
+    st.session_state.original_image = np_image
+    st.session_state.final_image = None # Clear final image when new image is uploaded
     
-    st.image(np_image, caption='Uploaded Image.', width='stretch')
+    # The image is displayed at the top of the page
 
     device = get_optimal_device()
-    face_helper = create_face_helper(device)
+    st.session_state.face_helper = create_face_helper(device)
     
-    st.session_state.cropped_faces = extract_faces(np_image, face_helper)
+    st.session_state.cropped_faces = extract_faces(np_image, st.session_state.face_helper)
 
     if st.button('Restore Faces'):
         with st.spinner("Restoring faces..."):
@@ -173,16 +187,16 @@ if st.session_state.gfpgan_faces and st.session_state.codeformer_faces:
 
     st.sidebar.title("Merge Settings")
     new_alpha = st.sidebar.slider(
-        "Structure vs. Color (Alpha)", 0.0, 1.0, st.session_state.alpha, 0.05,
-        help="Lower values prioritize structural similarity (SSIM), higher values prioritize color accuracy (MSE)."
+        "Structure vs. Color (Alpha)", 0.0, 1.0, st.session_state.alpha, 0.1,
+        help="Lower values prioritize structural integrity (SSIM), higher values prioritize color accuracy (MSE)."
     )
     new_delta_threshold = st.sidebar.slider(
-        "Fidelity Threshold", 0.0, 1.0, st.session_state.delta_threshold, 0.01,
-        help="How much error is tolerated before falling back to the original pixel. Lower is stricter."
+        "Fidelity Threshold", 0.0, 1.0, st.session_state.delta_threshold, 0.05,
+        help="How much difference from the original structure is allowed. Lower is stricter, and will look more like the original image."
     )
     new_tie_epsilon = st.sidebar.slider(
-        "Tie Epsilon", min_value=0.0, max_value=0.01, value=st.session_state.tie_epsilon, step=1e-4,
-        help="The threshold for considering two pixel scores a 'tie'. Higher values lead to more blending.",
+        "Blending", min_value=0.0, max_value=0.01, value=st.session_state.tie_epsilon, step=1e-3,
+        help="Setting a higher value leads to more blending, and produces a smoother result. May reduce artifacts.",
         format="%.4f"
     )
 
@@ -197,6 +211,15 @@ if st.session_state.gfpgan_faces and st.session_state.codeformer_faces:
                 run_merge(i)
         st.rerun()
 
+    if st.sidebar.button("Paste Faces to Original"):
+        if st.session_state.face_helper is not None and st.session_state.merged_faces:
+            with st.spinner("Pasting faces..."):
+                final_image = paste_faces(st.session_state.face_helper, st.session_state.merged_faces)
+                st.session_state.final_image = final_image
+                st.rerun()
+        else:
+            st.error("Could not paste faces. Please restore faces first.")
+
     if st.session_state.merge_stats:
         st.sidebar.markdown("---")
         st.sidebar.subheader("Merge Statistics")
@@ -204,8 +227,7 @@ if st.session_state.gfpgan_faces and st.session_state.codeformer_faces:
             st.sidebar.markdown(f"**Face {i+1}**")
             st.sidebar.json(stats)
 
-else:
-    if 'cropped_faces' in st.session_state and len(st.session_state.cropped_faces) > 0:
-        st.write(f"Found {len(st.session_state.cropped_faces)} faces:")
-        for i, face in enumerate(st.session_state.cropped_faces):
-            st.image(cv2.cvtColor(face, cv2.COLOR_BGR2RGB), caption=f'Face {i+1}', width='content')
+elif 'cropped_faces' in st.session_state and len(st.session_state.cropped_faces) > 0:
+    st.write(f"Found {len(st.session_state.cropped_faces)} faces:")
+    for i, face in enumerate(st.session_state.cropped_faces):
+        st.image(cv2.cvtColor(face, cv2.COLOR_BGR2RGB), caption=f'Face {i+1}')
