@@ -3,12 +3,15 @@ import os
 import cv2
 import numpy as np
 from PIL import Image
+from datetime import datetime
 from modules.face_extractor import create_face_helper, extract_faces, paste_faces
 from modules.devices import get_optimal_device
 from modules.gfpgan_model import setup_model as setup_gfpgan, gfpgan_face_restorer
 from modules.codeformer_model import setup_model as setup_codeformer, codeformer_face_restorer
 from modules import shared, images
 from modules.merger import merge_images_hybrid, precompute_error_maps
+from modules.esrgan_model import setup_model as setup_esrgan, esrgan_upscaler
+from modules.upscaler import UpscalerNone
 
 st.set_page_config(layout="wide")
 st.title("BFF - Better Face Fixer")
@@ -26,9 +29,19 @@ if not os.path.exists('.cache'):
 # Create a models directory if it doesn't exist
 if not os.path.exists('models'):
     os.makedirs('models')
+if not os.path.exists('results'):
+    os.makedirs('results')
 
-setup_gfpgan('models')
-setup_codeformer('models')
+# --- Model Setup ---
+# This should only run once
+if 'models_loaded' not in st.session_state:
+    shared.face_restorers.clear()
+    shared.sd_upscalers.clear()
+    setup_gfpgan('models')
+    setup_codeformer('models')
+    setup_esrgan('models/ESRGAN')
+    shared.sd_upscalers.insert(0, UpscalerNone().scalers[0])
+    st.session_state.models_loaded = True
 
 # Initialize session state
 if 'gfpgan_faces' not in st.session_state:
@@ -58,6 +71,10 @@ if 'original_image' not in st.session_state:
     st.session_state.original_image = None
 if 'final_image' not in st.session_state:
     st.session_state.final_image = None
+if 'selected_upscaler' not in st.session_state:
+    st.session_state.selected_upscaler = "None"
+if 'uploaded_file_name' not in st.session_state:
+    st.session_state.uploaded_file_name = None
 
 
 def run_merge(face_index: int):
@@ -104,18 +121,31 @@ def run_merge(face_index: int):
 uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    images.clear_cache()
-    pil_image = Image.open(uploaded_file)
-    np_image = np.array(pil_image)
-    st.session_state.original_image = np_image
-    st.session_state.final_image = None # Clear final image when new image is uploaded
-    
-    # The image is displayed at the top of the page
+    # Check if a new file has been uploaded
+    if st.session_state.uploaded_file_name != uploaded_file.name:
+        images.clear_cache()
+        
+        # Reset all state for the new image
+        pil_image = Image.open(uploaded_file)
+        np_image = np.array(pil_image)
+        st.session_state.original_image = np_image
+        st.session_state.final_image = None
+        st.session_state.gfpgan_faces = []
+        st.session_state.codeformer_faces = []
+        st.session_state.cropped_faces = []
+        st.session_state.merged_faces = []
+        st.session_state.codeformer_weights = []
+        st.session_state.merge_stats = []
+        st.session_state.error_maps_cache = []
+        
+        # Process the new image
+        device = get_optimal_device()
+        st.session_state.face_helper = create_face_helper(device)
+        st.session_state.cropped_faces = extract_faces(np_image, st.session_state.face_helper)
 
-    device = get_optimal_device()
-    st.session_state.face_helper = create_face_helper(device)
-    
-    st.session_state.cropped_faces = extract_faces(np_image, st.session_state.face_helper)
+        # Store the new file name *after* processing
+        st.session_state.uploaded_file_name = uploaded_file.name
+        st.rerun()
 
     if st.button('Restore Faces'):
         with st.spinner("Restoring faces..."):
@@ -219,6 +249,47 @@ if st.session_state.gfpgan_faces and st.session_state.codeformer_faces:
                 st.rerun()
         else:
             st.error("Could not paste faces. Please restore faces first.")
+
+    st.sidebar.markdown("---")
+    st.sidebar.title("Upscaling")
+
+    if shared.sd_upscalers:
+        upscaler_names = [upscaler.name for upscaler in shared.sd_upscalers]
+        st.sidebar.selectbox("Select Upscaler", upscaler_names, key='selected_upscaler')
+        
+        upscale_button_disabled = st.session_state.get('final_image') is None
+        if st.sidebar.button("Upscale Final Image", disabled=upscale_button_disabled):
+            selected_upscaler_name = st.session_state.selected_upscaler
+            if st.session_state.final_image is not None:
+                selected_upscaler = next((u for u in shared.sd_upscalers if u.name == selected_upscaler_name), None)
+                if selected_upscaler and esrgan_upscaler and selected_upscaler.name != "None":
+                    with st.spinner(f"Upscaling with {selected_upscaler_name}..."):
+                        pil_image = Image.fromarray(st.session_state.final_image)
+                        upscaled_image = esrgan_upscaler.upscale(pil_image, selected_upscaler.scale, selected_upscaler.data_path)
+                        
+                        # Save the image instead of displaying it
+                        date_str = datetime.now().strftime('%Y-%m-%d')
+                        
+                        # Find the next available sequence number for the filename
+                        i = 1
+                        while True:
+                            filename = f"{date_str}-{i}.jpg"
+                            save_path = os.path.join('results', filename)
+                            if not os.path.exists(save_path):
+                                break
+                            i += 1
+                        
+                        # Convert to RGB if it has an alpha channel, as JPEG doesn't support it
+                        if upscaled_image.mode == 'RGBA':
+                            upscaled_image = upscaled_image.convert('RGB')
+
+                        upscaled_image.save(save_path, 'jpeg')
+                        st.success(f"Image saved to {save_path}")
+
+                elif selected_upscaler and selected_upscaler.name == "None":
+                    st.info("Please select an upscaler.")
+                else:
+                    st.error("Selected upscaler not found.")
 
     if st.session_state.merge_stats:
         st.sidebar.markdown("---")
